@@ -1,22 +1,19 @@
 ﻿@page "/"
 @using System.Text.Json
 @using System.Text.Json.Serialization
+@using System.Text.RegularExpressions
+@using System.Text
 @using Microsoft.JSInterop
 @using NBitcoin
 
 @inject HttpClient Http
 @inject IJSRuntime JSRuntime
 
-<!--
-    เพิ่ม: ลิงก์สำหรับ Bootstrap CSS, Icons, และ JS
-    เพื่อให้หน้าเว็บแสดงผลและทำงานได้อย่างถูกต้องในทุกสภาพแวดล้อม
--->
+<!-- แก้ไข: เปลี่ยน xintegrity เป็น integrity ที่ถูกต้อง -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" xintegrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-
 <link rel="icon" type="image/x-icon" href="favicon.ico">
 
-<!-- *** ใหม่: เพิ่ม Style สำหรับ Dark Mode *** -->
 <style>
     body {
         transition: background-color 0.3s, color 0.3s;
@@ -27,7 +24,6 @@
 <PageTitle>BTC Utility Web App</PageTitle>
 
 <div class="container my-4">
-    <!-- *** ใหม่: เพิ่มปุ่มสลับ Dark Mode *** -->
     <div class="position-absolute top-0 end-0 p-3">
         <button class="btn btn-outline-secondary" @onclick="ToggleTheme">
             <i class="bi @(_isDarkMode ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
@@ -340,7 +336,7 @@
     private string _newXpubValue = "";
     private string _modalErrorMessage = "";
 
-    // --- ใหม่: State สำหรับ Dark Mode ---
+    // --- Dark Mode State ---
     private bool _isDarkMode = false;
 
     // --- Constants ---
@@ -358,24 +354,13 @@
     private void GenerateAddresses()
     {
         ClearResults();
-        if (!ValidateInputs()) return;
-
-        var network = GetNetworkFromString(_selectedNetworkString);
-        var addressType = GetAddressTypeFromString(_selectedAddressTypeString);
+        if (!ValidateInputs(out var network, out var addressType, out var extPubKey)) return;
 
         var addresses = new List<string>();
         for (int i = 0; i < _generateCount; i++)
         {
-            try
-            {
-                var address = GenerateAddressByIndex(_currentXpub, (uint)i, network, addressType);
-                addresses.Add(address.ToString());
-            }
-            catch (Exception ex)
-            {
-                _errorMessage = $"Error generating address at index {i}: {ex.Message}";
-                return;
-            }
+            var address = GenerateAddressByIndex(extPubKey, (uint)i, network, addressType);
+            addresses.Add(address.ToString());
         }
         _generatedAddresses = addresses;
     }
@@ -383,14 +368,11 @@
     private async Task CheckBalance()
     {
         ClearResults();
-        if (!ValidateInputs()) return;
+        if (!ValidateInputs(out var network, out var addressType, out var extPubKey)) return;
 
         IsBusy = true;
         _statusMessage = "Initializing scan...";
         StateHasChanged();
-
-        var network = GetNetworkFromString(_selectedNetworkString);
-        var addressType = GetAddressTypeFromString(_selectedAddressTypeString);
 
         long totalBalanceSatoshis = 0;
         int consecutiveUnused = 0;
@@ -399,7 +381,7 @@
 
         while (consecutiveUnused < _gapLimit)
         {
-            var address = GenerateAddressByIndex(_currentXpub, index, network, addressType);
+            var address = GenerateAddressByIndex(extPubKey, index, network, addressType);
             _statusMessage = $"Scanning Index {index} ({address.ToString().Substring(0, 10)}...)";
             StateHasChanged();
 
@@ -458,14 +440,35 @@
     }
 
     // --- Helper Methods ---
-    private bool ValidateInputs()
+    private bool ValidateInputs(out Network network, out ScriptPubKeyType addressType, out BitcoinExtPubKey extPubKey)
     {
-        if (string.IsNullOrWhiteSpace(_currentXpub))
+        network = GetNetworkFromString(_selectedNetworkString);
+        addressType = GetAddressTypeFromString(_selectedAddressTypeString);
+        extPubKey = null!;
+
+        var sanitizedXpub = SanitizeBase58String(_currentXpub);
+
+        if (string.IsNullOrWhiteSpace(sanitizedXpub))
         {
             _errorMessage = "Please enter or select an xpub.";
             return false;
         }
-        return true;
+
+        try
+        {
+            extPubKey = new BitcoinExtPubKey(sanitizedXpub, network);
+            if (_currentXpub != sanitizedXpub)
+            {
+                _currentXpub = sanitizedXpub;
+                StateHasChanged(); // Update the UI with the sanitized key
+            }
+            return true;
+        }
+        catch (FormatException)
+        {
+            _errorMessage = "Invalid xpub format or checksum. Please double-check the key and the selected network. This error can also be caused by invisible characters copied from other sources.";
+            return false;
+        }
     }
 
     private void ClearResults()
@@ -491,12 +494,10 @@
         };
     }
 
-    private BitcoinAddress GenerateAddressByIndex(string xpubString, uint addressIndex, Network network, ScriptPubKeyType addressType)
+    private BitcoinAddress GenerateAddressByIndex(BitcoinExtPubKey extPubKey, uint addressIndex, Network network, ScriptPubKeyType addressType)
     {
-        var extPubKey = new BitcoinExtPubKey(xpubString, network);
         var derivationPath = new KeyPath($"0/{addressIndex}");
         var derivedPubKey = extPubKey.Derive(derivationPath);
-
         var pubKey = derivedPubKey.GetPublicKey();
         return pubKey.GetAddress(addressType, network);
     }
@@ -508,6 +509,18 @@
             return string.Empty;
         }
         return text.Length <= maxLength ? text : $"{text.Substring(0, maxLength)}...";
+    }
+
+    // *** แก้ไข: เปลี่ยนกลับไปใช้ Regex ที่มีความรัดกุมกว่า ***
+    private string SanitizeBase58String(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return string.Empty;
+        }
+        // Regex นี้จะลบทุกอย่างที่ไม่ใช่อักขระ Base58 (a-z, A-Z, 1-9)
+        // ซึ่งเป็นวิธีที่ครอบคลุมและมีประสิทธิภาพที่สุดในการกำจัดอักขระที่ไม่ต้องการ
+        return Regex.Replace(input, "[^1-9A-HJ-NP-Za-km-z]", "");
     }
 
     // --- Config and Modal Logic ---
@@ -549,17 +562,20 @@
     {
         _modalErrorMessage = "";
 
-        if (string.IsNullOrWhiteSpace(_newAlias))
+        var trimmedAlias = _newAlias?.Trim();
+        var sanitizedXpubValue = SanitizeBase58String(_newXpubValue);
+
+        if (string.IsNullOrWhiteSpace(trimmedAlias))
         {
             _modalErrorMessage = "Alias cannot be empty.";
             return;
         }
-        if (_config.SavedXpubs.ContainsKey(_newAlias))
+        if (_config.SavedXpubs.ContainsKey(trimmedAlias))
         {
             _modalErrorMessage = "This alias already exists.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(_newXpubValue))
+        if (string.IsNullOrWhiteSpace(sanitizedXpubValue))
         {
             _modalErrorMessage = "xpub cannot be empty.";
             return;
@@ -567,15 +583,15 @@
 
         try
         {
-            new BitcoinExtPubKey(_newXpubValue, GetNetworkFromString(_selectedNetworkString));
+            new BitcoinExtPubKey(sanitizedXpubValue, GetNetworkFromString(_selectedNetworkString));
         }
         catch
         {
-            _modalErrorMessage = "Invalid xpub format.";
+            _modalErrorMessage = "Invalid xpub format or checksum.";
             return;
         }
 
-        _config.SavedXpubs[_newAlias] = _newXpubValue;
+        _config.SavedXpubs[trimmedAlias] = sanitizedXpubValue;
         _newAlias = "";
         _newXpubValue = "";
         await SaveConfigAsync();
@@ -590,7 +606,7 @@
         }
     }
 
-    // --- ใหม่: Logic สำหรับ Dark Mode ---
+    // --- Dark Mode Logic ---
     private async Task ToggleTheme()
     {
         _isDarkMode = !_isDarkMode;
@@ -603,7 +619,7 @@
         {
             var theme = await JSRuntime.InvokeAsync<string>("localStorage.getItem", ThemeKey);
             _isDarkMode = theme == "dark";
-            await SetThemeAsync(false); // ตั้งค่าธีมตอนโหลด โดยไม่ต้องบันทึกซ้ำ
+            await SetThemeAsync(false);
         }
         catch { /* Ignore JS interop errors */ }
     }

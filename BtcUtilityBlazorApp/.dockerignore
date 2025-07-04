@@ -1,0 +1,19 @@
+# .dockerignore
+
+# Exclude build artifacts and user-specific files
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Exclude source control folder
+.git/
+.gitignore
+
+# Exclude IDE-specific files
+.idea/
+*.sln.dotsettings
+
+# Exclude publish output
+**/publish/
