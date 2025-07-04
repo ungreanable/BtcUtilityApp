@@ -1,14 +1,20 @@
 #!/bin/sh
 
 # ตั้งค่า default base path เป็น "/"
-BASE_PATH=${ASPNETCORE_BASE_PATH:-/}
-echo "Setting base path to: $BASE_PATH"
+# และลบ trailing slash ที่อาจมีอยู่ (ถ้าไม่ใช่ root) เพื่อความถูกต้อง
+BASE_PATH=$(echo "${ASPNETCORE_BASE_PATH:-/}" | sed 's:/*$::')
+# สำหรับ Nginx เราต้องการ path ที่มี / ต่อท้าย (ยกเว้น root)
+NGINX_BASE_PATH="${BASE_PATH}/"
 
-# ค้นหาและแทนที่ placeholder ใน index.html
-# sed -i 's|__BASE_PATH__|'${BASE_PATH}'|g' /usr/share/nginx/html/index.html
-# ใช้ cp และ sed เพื่อความเข้ากันได้ที่ดีกว่า
-cp /usr/share/nginx/html/index.html /usr/share/nginx/html/index.html.tmp
-sed 's|__BASE_PATH__|'${BASE_PATH}'|g' /usr/share/nginx/html/index.html.tmp > /usr/share/nginx/html/index.html
+echo "Base Path for Blazor (<base href>): ${NGINX_BASE_PATH}"
+echo "Base Path for Nginx (location): ${NGINX_BASE_PATH}"
+
+# แทนที่ Placeholder ใน index.html
+# ใช้ | เป็น delimiter เพื่อป้องกันปัญหากับเครื่องหมาย / ใน path
+sed -i 's|__BASE_PATH__|'${NGINX_BASE_PATH}'|g' /usr/share/nginx/html/index.html
+
+# แทนที่ Placeholder ใน nginx.conf
+sed -i 's|__NGINX_BASE_PATH__|'${NGINX_BASE_PATH}'|g' /etc/nginx/conf.d/default.conf
 
 # เริ่มการทำงานของ Nginx
 echo "Starting Nginx..."
