@@ -5,7 +5,7 @@ VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcUtilityApp", "BtcUtilityApp.csproj", "{5719ECC8-7F0B-4AD4-83F8-527AB857A9B2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcUtilityBlazorApp", "..\BtcUtilityBlazorApp\BtcUtilityBlazorApp.csproj", "{AD8069A2-1C26-499A-96B9-06B4FA332A06}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcUtilityBlazorApp", "BtcUtilityBlazorApp\BtcUtilityBlazorApp.csproj", "{AD8069A2-1C26-499A-96B9-06B4FA332A06}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

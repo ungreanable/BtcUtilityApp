@@ -1,0 +1,633 @@
+﻿@page "/"
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using Microsoft.JSInterop
+@using NBitcoin
+
+@inject HttpClient Http
+@inject IJSRuntime JSRuntime
+
+<!--
+    เพิ่ม: ลิงก์สำหรับ Bootstrap CSS, Icons, และ JS
+    เพื่อให้หน้าเว็บแสดงผลและทำงานได้อย่างถูกต้องในทุกสภาพแวดล้อม
+-->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" xintegrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+
+<!-- *** ใหม่: เพิ่ม Style สำหรับ Dark Mode *** -->
+<style>
+    body {
+        transition: background-color 0.3s, color 0.3s;
+    }
+</style>
+
+
+<PageTitle>BTC Utility Web App</PageTitle>
+
+<div class="container my-4">
+    <!-- *** ใหม่: เพิ่มปุ่มสลับ Dark Mode *** -->
+    <div class="position-absolute top-0 end-0 p-3">
+        <button class="btn btn-outline-secondary" @onclick="ToggleTheme">
+            <i class="bi @(_isDarkMode ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
+        </button>
+    </div>
+
+    <header class="text-center mb-4">
+        <div class="d-flex justify-content-center align-items-center mb-2">
+            <h1 class="display-5 me-3 d-inline-flex align-items-center">
+                <img src="images/bitcoin.ico" alt="Bitcoin Icon" style="width: 40px; height: 40px; margin-right: 0.75rem;">
+                BTC Utility Web App
+            </h1>
+            <button class="btn btn-outline-info" @onclick="ShowHelpModal"><i class="bi bi-question-circle-fill"></i> Help / FAQ</button>
+        </div>
+        <p class="lead text-muted">A web-based tool for generating BTC addresses and checking balances from an xpub.</p>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+
+                    <!-- xpub Input Section -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">1. Select or Enter your xpub</label>
+                        <div class="input-group">
+                            <select class="form-select" @onchange="OnSavedXpubSelected">
+                                <option value="">-- Choose a saved xpub --</option>
+                                @foreach (var alias in _config.SavedXpubs.Keys)
+                                {
+                                    <option value="@alias">@alias</option>
+                                }
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" @onclick="ShowConfigModal">Manage</button>
+                        </div>
+                        <textarea class="form-control mt-2" rows="3" placeholder="Or paste your xpub/ypub/zpub here..." @bind="_currentXpub" @bind:event="oninput"></textarea>
+                    </div>
+
+                    <!-- Settings Section -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="networkSelect" class="form-label fw-bold">2. Network</label>
+                            <select id="networkSelect" class="form-select" @bind="_selectedNetworkString">
+                                <option value="Main">Main</option>
+                                <option value="TestNet">Testnet</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="addressTypeSelect" class="form-label fw-bold">3. Address Type</label>
+                            <select id="addressTypeSelect" class="form-select" @bind="_selectedAddressTypeString">
+                                <option value="Segwit">Native Segwit (bc1...)</option>
+                                <option value="SegwitP2SH">Segwit (3...)</option>
+                                <option value="Legacy">Legacy (1...)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Settings Section -->
+                    <div class="d-flex justify-content-end mb-2">
+                        <button class="btn btn-link btn-sm" type="button" @onclick="ToggleAdvancedSettings">
+                            Advanced Settings <i class="bi @(_showAdvanced ? "bi-chevron-up" : "bi-chevron-down")"></i>
+                        </button>
+                    </div>
+
+                    <div class="collapse @(_showAdvanced ? "show" : "")">
+                        <div class="card card-body bg-light mb-4">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="generateCount" class="form-label">Addresses to Generate</label>
+                                    <input type="number" id="generateCount" class="form-control" @bind="_generateCount" min="1" max="1000">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="gapLimit" class="form-label">Balance Scan Gap Limit</label>
+                                    <input type="number" id="gapLimit" class="form-control" @bind="_gapLimit" min="1" max="100">
+                                </div>
+                            </div>
+                            <div class="alert alert-warning mt-3 mb-0">
+                                <strong>Warning:</strong>
+                                <ul class="mb-0">
+                                    <li>Setting a high <strong>Gap Limit</strong> may slow down the scan and could lead to rate limiting from the blockstream.info API.</li>
+                                    <li>Generating a large number of <strong>Addresses</strong> may slow down your browser.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- End Advanced Settings Section -->
+                    <!-- Action Buttons -->
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                        <button class="btn btn-primary btn-lg px-4" @onclick="GenerateAddresses" disabled="@IsBusy">
+                            <i class="bi bi-plus-circle"></i> Generate Addresses
+                        </button>
+                        <button class="btn btn-success btn-lg px-4" @onclick="CheckBalance" disabled="@IsBusy">
+                            <i class="bi bi-search"></i> Check Balance
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Results Area -->
+            @if (IsBusy)
+            {
+                <div class="text-center mt-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">@_statusMessage</p>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="alert alert-danger mt-4">@_errorMessage</div>
+            }
+
+            <!-- Address Generation Result -->
+            @if (_generatedAddresses.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-header">Generated Addresses (@_generatedAddresses.Count)</div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var addr in _generatedAddresses)
+                            {
+                                <li class="list-group-item font-monospace">@addr</li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            }
+
+            @if (_scanResults.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-header">Balance Scan Details</div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var result in _scanResults)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center font-monospace">
+                                    <span>@result.Index: @result.Address</span>
+                                    @if (result.Balance > 0)
+                                    {
+                                        <span class="badge bg-success rounded-pill">@Money.Satoshis(result.Balance).ToDecimal(MoneyUnit.BTC) BTC</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary rounded-pill">Empty</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            }
+
+
+            <!-- Balance Check Result -->
+            @if (_balanceResult != null)
+            {
+                <div class="card mt-4">
+                    <div class="card-header">Total Balance Result</div>
+                    <div class="card-body text-center">
+                        <h3 class="display-6">@_balanceResult.ToDecimal(MoneyUnit.BTC) BTC</h3>
+                        <p class="text-muted">Total confirmed balance</p>
+                    </div>
+                </div>
+            }
+
+        </div>
+    </div>
+</div>
+
+
+<!-- Config Management Modal -->
+<div class="modal fade" id="configModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Manage Saved xpubs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-4 p-3 border rounded">
+                    <h6>Add a New xpub</h6>
+                    @if (!string.IsNullOrEmpty(_modalErrorMessage))
+                    {
+                        <div class="alert alert-danger p-2">@_modalErrorMessage</div>
+                    }
+                    <div class="mb-2">
+                        <label for="newAlias" class="form-label">Alias (short name)</label>
+                        <input type="text" id="newAlias" class="form-control" @bind="_newAlias" placeholder="e.g., My Ledger Wallet">
+                    </div>
+                    <div class="mb-2">
+                        <label for="newXpub" class="form-label">xpub/ypub/zpub</label>
+                        <textarea id="newXpub" class="form-control" @bind="_newXpubValue" rows="2"></textarea>
+                    </div>
+                    <button class="btn btn-sm btn-success" @onclick="SaveNewXpub">Save xpub</button>
+                </div>
+                <h6>Saved xpubs</h6>
+                @if (_config.SavedXpubs.Any())
+                {
+                    <ul class="list-group">
+                        @foreach (var entry in _config.SavedXpubs)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong class="d-block">@entry.Key</strong>
+                                    <small class="text-muted font-monospace">@Truncate(entry.Value, 15)</small>
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteXpub(entry.Key)">Delete</button>
+                            </li>
+                        }
+                    </ul>
+                }
+                else
+                {
+                    <p class="text-muted">No xpubs saved yet.</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Help / FAQ Modal -->
+<div class="modal fade" id="helpModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Help / FAQ: How to get your xpub</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>An xpub (Extended Public Key) allows this tool to view your addresses and balances without needing your private keys. <strong>Your funds are safe.</strong></p>
+                <div class="accordion" id="faqAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseLedger" aria-expanded="false" aria-controls="collapseLedger">
+                                <img src="images/ledger/ledger.ico" alt="Ledger Icon" class="me-2" style="width: 20px; height: 20px;">
+                                <strong>Ledger Wallet</strong>
+                            </button>
+                        </h2>
+                        <div id="collapseLedger" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                            <div class="accordion-body">
+                                <ol>
+                                    <li>Open <strong>Ledger Live</strong> on your desktop.</li>
+                                    <li>Go to the <strong>Accounts</strong> tab and select your Bitcoin account.</li>
+                                    <li>Click the <strong>wrench icon</strong> (Settings) in the top-right corner.</li>
+                                    <li>In the 'Edit account' window, click on <strong>Advanced Logs</strong>.</li>
+                                    <li>Copy the long string that starts with <code>xpub</code>, <code>ypub</code>, or <code>zpub</code>.</li>
+                                </ol>
+                                <img src="images/ledger/ledger-guide.webp" class="img-fluid rounded" alt="Ledger Live xpub export guide">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTrezor" aria-expanded="false" aria-controls="collapseTrezor">
+                                <img src="images/trezor/trezor.ico" alt="Trezor Icon" class="me-2" style="width: 20px; height: 20px;">
+                                <strong>Trezor Wallet</strong>
+                            </button>
+                        </h2>
+                        <div id="collapseTrezor" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                            <div class="accordion-body">
+                                <ol>
+                                    <li>Connect your Trezor and open the <strong>Trezor Suite</strong> application.</li>
+                                    <li>Select your Bitcoin account from the left menu.</li>
+                                    <li>Go to the <strong>Account</strong> tab (it might be named 'Details' in some versions).</li>
+                                    <li>Click on <strong>Show public key</strong> (or similar wording like 'Account public key').</li>
+                                    <li>A modal will appear showing your xpub. You can copy it from there.</li>
+                                </ol>
+                                <img src="images/trezor/trezor-guide.webp" class="img-fluid rounded" alt="Trezor Suite xpub export guide">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Script สำหรับ Bootstrap JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+
+@code {
+    // --- State Variables ---
+    private AppConfig _config = new();
+    private string _currentXpub = "";
+    private string _selectedNetworkString = "Main";
+    private string _selectedAddressTypeString = "Segwit";
+
+    private List<string> _generatedAddresses = new();
+    private Money? _balanceResult = null;
+    private string _statusMessage = "";
+    private string _errorMessage = "";
+    private bool IsBusy = false;
+
+    // --- Advanced Settings State ---
+    private bool _showAdvanced = false;
+    private int _gapLimit = 20;
+    private int _generateCount = 20;
+
+    private List<ScanResult> _scanResults = new();
+
+    // --- Config Modal State ---
+    private string _newAlias = "";
+    private string _newXpubValue = "";
+    private string _modalErrorMessage = "";
+
+    // --- ใหม่: State สำหรับ Dark Mode ---
+    private bool _isDarkMode = false;
+
+    // --- Constants ---
+    private const string ConfigKey = "BtcUtilityConfig";
+    private const string ThemeKey = "BtcUtilityTheme";
+
+    // --- Lifecycle Methods ---
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadConfigAsync();
+        await LoadThemeAsync();
+    }
+
+    // --- UI Event Handlers ---
+    private void GenerateAddresses()
+    {
+        ClearResults();
+        if (!ValidateInputs()) return;
+
+        var network = GetNetworkFromString(_selectedNetworkString);
+        var addressType = GetAddressTypeFromString(_selectedAddressTypeString);
+
+        var addresses = new List<string>();
+        for (int i = 0; i < _generateCount; i++)
+        {
+            try
+            {
+                var address = GenerateAddressByIndex(_currentXpub, (uint)i, network, addressType);
+                addresses.Add(address.ToString());
+            }
+            catch (Exception ex)
+            {
+                _errorMessage = $"Error generating address at index {i}: {ex.Message}";
+                return;
+            }
+        }
+        _generatedAddresses = addresses;
+    }
+
+    private async Task CheckBalance()
+    {
+        ClearResults();
+        if (!ValidateInputs()) return;
+
+        IsBusy = true;
+        _statusMessage = "Initializing scan...";
+        StateHasChanged();
+
+        var network = GetNetworkFromString(_selectedNetworkString);
+        var addressType = GetAddressTypeFromString(_selectedAddressTypeString);
+
+        long totalBalanceSatoshis = 0;
+        int consecutiveUnused = 0;
+        uint index = 0;
+        string apiEndpoint = network == Network.Main ? "api" : "api/testnet";
+
+        while (consecutiveUnused < _gapLimit)
+        {
+            var address = GenerateAddressByIndex(_currentXpub, index, network, addressType);
+            _statusMessage = $"Scanning Index {index} ({address.ToString().Substring(0, 10)}...)";
+            StateHasChanged();
+
+            try
+            {
+                var response = await Http.GetStringAsync($"https://blockstream.info/{apiEndpoint}/address/{address}");
+                using var doc = JsonDocument.Parse(response);
+                var chainStats = doc.RootElement.GetProperty("chain_stats");
+                int txCount = chainStats.GetProperty("tx_count").GetInt32();
+
+                if (txCount > 0)
+                {
+                    long fundedSum = chainStats.GetProperty("funded_txo_sum").GetInt64();
+                    long spentSum = chainStats.GetProperty("spent_txo_sum").GetInt64();
+                    long balance = fundedSum - spentSum;
+                    totalBalanceSatoshis += balance;
+                    consecutiveUnused = 0;
+                    _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = balance });
+                }
+                else
+                {
+                    consecutiveUnused++;
+                    _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = 0 });
+                }
+            }
+            catch (HttpRequestException)
+            {
+                consecutiveUnused++;
+                _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = 0 });
+            }
+            catch (Exception ex)
+            {
+                _errorMessage = $"An unexpected error occurred at index {index}: {ex.Message}";
+                IsBusy = false;
+                return;
+            }
+            index++;
+        }
+
+        _balanceResult = Money.Satoshis(totalBalanceSatoshis);
+        IsBusy = false;
+    }
+
+    private void OnSavedXpubSelected(ChangeEventArgs e)
+    {
+        var alias = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(alias) && _config.SavedXpubs.TryGetValue(alias, out var xpub))
+        {
+            _currentXpub = xpub;
+        }
+    }
+
+    private void ToggleAdvancedSettings()
+    {
+        _showAdvanced = !_showAdvanced;
+    }
+
+    // --- Helper Methods ---
+    private bool ValidateInputs()
+    {
+        if (string.IsNullOrWhiteSpace(_currentXpub))
+        {
+            _errorMessage = "Please enter or select an xpub.";
+            return false;
+        }
+        return true;
+    }
+
+    private void ClearResults()
+    {
+        _errorMessage = "";
+        _generatedAddresses.Clear();
+        _balanceResult = null;
+        _scanResults.Clear();
+    }
+
+    private Network GetNetworkFromString(string networkString)
+    {
+        return networkString == "Main" ? Network.Main : Network.TestNet;
+    }
+
+    private ScriptPubKeyType GetAddressTypeFromString(string addressTypeString)
+    {
+        return addressTypeString switch
+        {
+            "Legacy" => ScriptPubKeyType.Legacy,
+            "SegwitP2SH" => ScriptPubKeyType.SegwitP2SH,
+            _ => ScriptPubKeyType.Segwit // Default
+        };
+    }
+
+    private BitcoinAddress GenerateAddressByIndex(string xpubString, uint addressIndex, Network network, ScriptPubKeyType addressType)
+    {
+        var extPubKey = new BitcoinExtPubKey(xpubString, network);
+        var derivationPath = new KeyPath($"0/{addressIndex}");
+        var derivedPubKey = extPubKey.Derive(derivationPath);
+
+        var pubKey = derivedPubKey.GetPublicKey();
+        return pubKey.GetAddress(addressType, network);
+    }
+
+    private string Truncate(string text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+        return text.Length <= maxLength ? text : $"{text.Substring(0, maxLength)}...";
+    }
+
+    // --- Config and Modal Logic ---
+    private async Task LoadConfigAsync()
+    {
+        try
+        {
+            var json = await JSRuntime.InvokeAsync<string>("localStorage.getItem", ConfigKey);
+            if (!string.IsNullOrEmpty(json))
+            {
+                _config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+            }
+        }
+        catch { /* Ignore JS interop errors on first load */ }
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(_config);
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", ConfigKey, json);
+        }
+        catch { /* Ignore JS interop errors */ }
+    }
+
+    private async Task ShowConfigModal()
+    {
+        _modalErrorMessage = "";
+        await JSRuntime.InvokeVoidAsync("eval", "new bootstrap.Modal(document.getElementById('configModal')).show()");
+    }
+
+    private async Task ShowHelpModal()
+    {
+        await JSRuntime.InvokeVoidAsync("eval", "new bootstrap.Modal(document.getElementById('helpModal')).show()");
+    }
+
+    private async Task SaveNewXpub()
+    {
+        _modalErrorMessage = "";
+
+        if (string.IsNullOrWhiteSpace(_newAlias))
+        {
+            _modalErrorMessage = "Alias cannot be empty.";
+            return;
+        }
+        if (_config.SavedXpubs.ContainsKey(_newAlias))
+        {
+            _modalErrorMessage = "This alias already exists.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_newXpubValue))
+        {
+            _modalErrorMessage = "xpub cannot be empty.";
+            return;
+        }
+
+        try
+        {
+            new BitcoinExtPubKey(_newXpubValue, GetNetworkFromString(_selectedNetworkString));
+        }
+        catch
+        {
+            _modalErrorMessage = "Invalid xpub format.";
+            return;
+        }
+
+        _config.SavedXpubs[_newAlias] = _newXpubValue;
+        _newAlias = "";
+        _newXpubValue = "";
+        await SaveConfigAsync();
+    }
+
+    private async Task DeleteXpub(string alias)
+    {
+        if (_config.SavedXpubs.ContainsKey(alias))
+        {
+            _config.SavedXpubs.Remove(alias);
+            await SaveConfigAsync();
+        }
+    }
+
+    // --- ใหม่: Logic สำหรับ Dark Mode ---
+    private async Task ToggleTheme()
+    {
+        _isDarkMode = !_isDarkMode;
+        await SetThemeAsync();
+    }
+
+    private async Task LoadThemeAsync()
+    {
+        try
+        {
+            var theme = await JSRuntime.InvokeAsync<string>("localStorage.getItem", ThemeKey);
+            _isDarkMode = theme == "dark";
+            await SetThemeAsync(false); // ตั้งค่าธีมตอนโหลด โดยไม่ต้องบันทึกซ้ำ
+        }
+        catch { /* Ignore JS interop errors */ }
+    }
+
+    private async Task SetThemeAsync(bool save = true)
+    {
+        var theme = _isDarkMode ? "dark" : "light";
+        await JSRuntime.InvokeVoidAsync("eval", $"document.documentElement.setAttribute('data-bs-theme', '{theme}')");
+        if (save)
+        {
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", ThemeKey, theme);
+        }
+    }
+
+    // --- Data Models ---
+    public class AppConfig
+    {
+        public Dictionary<string, string> SavedXpubs { get; set; } = new();
+    }
+
+    public class ScanResult
+    {
+        public required string Index { get; set; }
+        public required string Address { get; set; }
+        public long Balance { get; set; }
+    }
+}
