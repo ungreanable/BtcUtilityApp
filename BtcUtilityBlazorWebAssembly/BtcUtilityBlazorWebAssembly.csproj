@@ -7,6 +7,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="wwwroot\favicon.ico" />
+    <None Include="wwwroot\images\bitcoin.ico" />
+    <None Include="wwwroot\images\ledger\ledger-guide.webp" />
+    <None Include="wwwroot\images\ledger\ledger.ico" />
+    <None Include="wwwroot\images\ledger\ledger.webp" />
+    <None Include="wwwroot\images\trezor\trezor-guide.webp" />
+    <None Include="wwwroot\images\trezor\trezor.ico" />
+    <None Include="wwwroot\images\trezor\trezor.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.17" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.17" PrivateAssets="all" />
     <PackageReference Include="NBitcoin" Version="9.0.0" />

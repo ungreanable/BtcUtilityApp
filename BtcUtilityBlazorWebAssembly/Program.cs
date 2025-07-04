@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
-namespace BtcUtilityBlazorApp
+namespace BtcUtilityBlazorWebAssembly
 {
     public class Program
     {
