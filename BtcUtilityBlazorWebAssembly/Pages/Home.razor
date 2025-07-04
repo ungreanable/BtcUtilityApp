@@ -93,7 +93,8 @@
                     </div>
 
                     <div class="collapse @(_showAdvanced ? "show" : "")">
-                        <div class="card card-body bg-light mb-4">
+                        <!-- แก้ไข: เปลี่ยน bg-light เป็น bg-body-tertiary เพื่อให้ปรับตามธีม -->
+                        <div class="card card-body bg-body-tertiary mb-4">
                             <div class="row g-3">
                                 <div class="col-md-6">
                                     <label for="generateCount" class="form-label">Addresses to Generate</label>
@@ -134,7 +135,6 @@
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <!-- แก้ไข: เพิ่ม class สำหรับแจ้งเตือน -->
                     <p class="mt-2 @(_isApproachingGapLimit ? "status-warning" : "")">@_statusMessage</p>
                 </div>
             }
@@ -163,7 +163,6 @@
             @if (_scanResults.Any())
             {
                 <div class="card mt-4">
-                    <!-- แก้ไข: เพิ่มตัวนับ Address ที่เจอ Balance -->
                     <div class="card-header">Balance Scan Details (Found: @_foundBalanceCount)</div>
                     <div class="card-body" style="max-height: 300px; overflow-y: auto;">
                         <ul class="list-group list-group-flush">
@@ -335,7 +334,6 @@
     private int _generateCount = 20;
 
     private List<ScanResult> _scanResults = new();
-    // --- ใหม่: State สำหรับการนับและแจ้งเตือน ---
     private int _foundBalanceCount = 0;
     private bool _isApproachingGapLimit = false;
 
@@ -391,7 +389,6 @@
         {
             var address = GenerateAddressByIndex(extPubKey, index, network, addressType);
 
-            // อัปเดต Status Message
             _isApproachingGapLimit = (_gapLimit - consecutiveUnused) <= GapLimitWarningThreshold;
             _statusMessage = $"Scanning Index {index}... (Empty streak: {consecutiveUnused}/{_gapLimit})";
             StateHasChanged();
