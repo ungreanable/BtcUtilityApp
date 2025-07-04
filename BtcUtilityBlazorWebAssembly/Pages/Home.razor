@@ -9,7 +9,6 @@
 @inject HttpClient Http
 @inject IJSRuntime JSRuntime
 
-<!-- แก้ไข: เปลี่ยน xintegrity เป็น integrity ที่ถูกต้อง -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" xintegrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -17,6 +16,10 @@
 <style>
     body {
         transition: background-color 0.3s, color 0.3s;
+    }
+
+    .status-warning {
+        color: var(--bs-orange);
     }
 </style>
 
@@ -131,7 +134,8 @@
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p class="mt-2">@_statusMessage</p>
+                    <!-- แก้ไข: เพิ่ม class สำหรับแจ้งเตือน -->
+                    <p class="mt-2 @(_isApproachingGapLimit ? "status-warning" : "")">@_statusMessage</p>
                 </div>
             }
 
@@ -159,7 +163,8 @@
             @if (_scanResults.Any())
             {
                 <div class="card mt-4">
-                    <div class="card-header">Balance Scan Details</div>
+                    <!-- แก้ไข: เพิ่มตัวนับ Address ที่เจอ Balance -->
+                    <div class="card-header">Balance Scan Details (Found: @_foundBalanceCount)</div>
                     <div class="card-body" style="max-height: 300px; overflow-y: auto;">
                         <ul class="list-group list-group-flush">
                             @foreach (var result in _scanResults)
@@ -330,6 +335,9 @@
     private int _generateCount = 20;
 
     private List<ScanResult> _scanResults = new();
+    // --- ใหม่: State สำหรับการนับและแจ้งเตือน ---
+    private int _foundBalanceCount = 0;
+    private bool _isApproachingGapLimit = false;
 
     // --- Config Modal State ---
     private string _newAlias = "";
@@ -342,6 +350,7 @@
     // --- Constants ---
     private const string ConfigKey = "BtcUtilityConfig";
     private const string ThemeKey = "BtcUtilityTheme";
+    private const int GapLimitWarningThreshold = 5;
 
     // --- Lifecycle Methods ---
     protected override async Task OnInitializedAsync()
@@ -371,7 +380,6 @@
         if (!ValidateInputs(out var network, out var addressType, out var extPubKey)) return;
 
         IsBusy = true;
-        _statusMessage = "Initializing scan...";
         StateHasChanged();
 
         long totalBalanceSatoshis = 0;
@@ -382,7 +390,10 @@
         while (consecutiveUnused < _gapLimit)
         {
             var address = GenerateAddressByIndex(extPubKey, index, network, addressType);
-            _statusMessage = $"Scanning Index {index} ({address.ToString().Substring(0, 10)}...)";
+
+            // อัปเดต Status Message
+            _isApproachingGapLimit = (_gapLimit - consecutiveUnused) <= GapLimitWarningThreshold;
+            _statusMessage = $"Scanning Index {index}... (Empty streak: {consecutiveUnused}/{_gapLimit})";
             StateHasChanged();
 
             try
@@ -397,7 +408,13 @@
                     long fundedSum = chainStats.GetProperty("funded_txo_sum").GetInt64();
                     long spentSum = chainStats.GetProperty("spent_txo_sum").GetInt64();
                     long balance = fundedSum - spentSum;
-                    totalBalanceSatoshis += balance;
+
+                    if (balance > 0)
+                    {
+                        totalBalanceSatoshis += balance;
+                        _foundBalanceCount++;
+                    }
+
                     consecutiveUnused = 0;
                     _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = balance });
                 }
@@ -460,7 +477,7 @@
             if (_currentXpub != sanitizedXpub)
             {
                 _currentXpub = sanitizedXpub;
-                StateHasChanged(); // Update the UI with the sanitized key
+                StateHasChanged();
             }
             return true;
         }
@@ -477,6 +494,8 @@
         _generatedAddresses.Clear();
         _balanceResult = null;
         _scanResults.Clear();
+        _foundBalanceCount = 0;
+        _isApproachingGapLimit = false;
     }
 
     private Network GetNetworkFromString(string networkString)
@@ -511,15 +530,12 @@
         return text.Length <= maxLength ? text : $"{text.Substring(0, maxLength)}...";
     }
 
-    // *** แก้ไข: เปลี่ยนกลับไปใช้ Regex ที่มีความรัดกุมกว่า ***
     private string SanitizeBase58String(string? input)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
             return string.Empty;
         }
-        // Regex นี้จะลบทุกอย่างที่ไม่ใช่อักขระ Base58 (a-z, A-Z, 1-9)
-        // ซึ่งเป็นวิธีที่ครอบคลุมและมีประสิทธิภาพที่สุดในการกำจัดอักขระที่ไม่ต้องการ
         return Regex.Replace(input, "[^1-9A-HJ-NP-Za-km-z]", "");
     }
 
@@ -618,7 +634,16 @@
         try
         {
             var theme = await JSRuntime.InvokeAsync<string>("localStorage.getItem", ThemeKey);
-            _isDarkMode = theme == "dark";
+            if (theme != null)
+            {
+                _isDarkMode = theme == "dark";
+            }
+            else
+            {
+                // Auto-detect theme based on time if no preference is saved
+                var hour = DateTime.Now.Hour;
+                _isDarkMode = hour < 6 || hour >= 18;
+            }
             await SetThemeAsync(false);
         }
         catch { /* Ignore JS interop errors */ }
