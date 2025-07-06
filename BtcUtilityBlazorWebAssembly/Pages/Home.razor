@@ -3,6 +3,7 @@
 @using System.Text.Json.Serialization
 @using System.Text.RegularExpressions
 @using System.Text
+@using System.Globalization
 @using Microsoft.JSInterop
 @using NBitcoin
 
@@ -51,26 +52,28 @@
 
 
 <div class="container my-4">
-    <div class="position-absolute top-0 end-0 p-3 d-flex align-items-center gap-2">
-        @if (_currentBtcPrice.HasValue)
-        {
-            <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis rounded-pill fs-6" title="Last updated: @_lastPriceUpdate?.ToString("HH:mm:ss")">
-                <img src="images/bitcoin.ico" style="width: 16px; height: 16px; margin-top: -2px;" />
-                $@_currentBtcPrice.Value.ToString("N2")
-            </span>
-        }
-        <button class="btn btn-outline-secondary" @onclick="ToggleTheme">
-            <i class="bi @(_isDarkMode ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
-        </button>
-    </div>
-
     <header class="text-center mb-4">
-        <div class="d-flex justify-content-center align-items-center mb-2">
-            <h1 class="display-5 me-3 d-inline-flex align-items-center">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <h1 class="display-5 d-inline-flex align-items-center m-0">
                 <img src="images/bitcoin.ico" alt="Bitcoin Icon" style="width: 40px; height: 40px; margin-right: 0.75rem;">
                 BTC Utility Web App
             </h1>
-            <button class="btn btn-outline-info" @onclick="ShowHelpModal"><i class="bi bi-question-circle-fill"></i> Help / FAQ</button>
+            <div class="d-flex align-items-center gap-2">
+                @if (_currentBtcPrice.HasValue)
+                {
+                    <div class="d-flex align-items-center gap-2 p-1 rounded" style="background-color: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
+                        <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis rounded-pill fs-6">
+                            <img src="images/bitcoin.ico" style="width: 16px; height: 16px; margin-top: -2px;" />
+                            $@_currentBtcPrice.Value.ToString("N2")
+                        </span>
+                        <small class="text-muted" style="font-size: 0.75em;">(Updated: @_lastPriceUpdate?.ToString("HH:mm:ss"))</small>
+                    </div>
+                }
+                <button class="btn btn-outline-info" @onclick="ShowHelpModal"><i class="bi bi-question-circle-fill"></i></button>
+                <button class="btn btn-outline-secondary" @onclick="ToggleTheme">
+                    <i class="bi @(_isDarkMode ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
+                </button>
+            </div>
         </div>
         <p class="lead text-muted">A web-based tool for generating BTC addresses and checking balances from an xpub.</p>
     </header>
@@ -185,7 +188,7 @@
             @if (_generatedAddresses.Any())
             {
                 <div class="card mt-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <span>Generated Addresses (@_generatedAddresses.Count)</span>
                         <div class="d-flex align-items-center gap-2">
                             <div class="input-group input-group-sm" style="width: 150px;">
@@ -237,7 +240,7 @@
             @if (_scanResults.Any())
             {
                 <div class="card mt-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <span>Balance Scan Details (Found: @_foundBalanceCount)</span>
                         <div class="d-flex align-items-center gap-2">
                             <div class="input-group input-group-sm" style="width: 150px;">
@@ -482,13 +485,17 @@
             if (this.priceSocket) {
                 this.priceSocket.close();
             }
+        },
+        initializeTooltips: function () {
+            const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+            [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
         }
     };
 </script>
 
 
 @code {
-    // --- State Variables ---
+    // #region State Variables
     private AppConfig _config = new();
     private string _currentXpub = "";
     private string _selectedNetworkString = "Main";
@@ -500,47 +507,50 @@
     private string _errorMessage = "";
     private bool IsBusy = false;
     private decimal? _currentBtcPrice = null;
+    // #endregion
 
-    // --- Advanced Settings State ---
+    // #region Advanced Settings State
     private bool _showAdvanced = false;
     private int _gapLimit = 20;
     private int _generateCount = 20;
     private int _pageSize = 20;
     private bool _checkIfAddressUsed = false;
+    // #endregion
 
-    // --- Pagination State ---
+    // #region Pagination State
     private int _genAddrCurrentPage = 1;
     private int _genAddrTotalPages = 1;
     private int _scanCurrentPage = 1;
     private int _scanTotalPages = 1;
+    // #endregion
 
-    // --- Scan State ---
+    // #region Scan State
     private List<ScanResult> _scanResults = new();
     private int _foundBalanceCount = 0;
     private bool _isApproachingGapLimit = false;
+    // #endregion
 
-    // --- Config Modal State ---
+    // #region Modal & UI State
     private string _newAlias = "";
     private string _newXpubValue = "";
     private string _modalErrorMessage = "";
-
-    // --- Dark Mode State ---
     private bool _isDarkMode = false;
-
-    // --- Toast & Highlight State ---
     private string _toastMessage = "";
     private HashSet<string> _copiedAddresses = new();
+    // #endregion
 
-    // --- WebSocket State ---
+    // #region WebSocket State
     private DotNetObjectReference<Home>? _dotNetHelper;
     private DateTime? _lastPriceUpdate;
+    // #endregion
 
-    // --- Constants ---
+    // #region Constants
     private const string ConfigKey = "BtcUtilityConfig";
     private const string ThemeKey = "BtcUtilityTheme";
     private const int GapLimitWarningThreshold = 5;
+    // #endregion
 
-    // --- Lifecycle Methods ---
+    // #region Lifecycle Methods
     protected override async Task OnInitializedAsync()
     {
         _dotNetHelper = DotNetObjectReference.Create(this);
@@ -549,7 +559,20 @@
         await JSRuntime.InvokeVoidAsync("btcUtility.startPriceWebSocket", _dotNetHelper);
     }
 
-    // --- UI Event Handlers ---
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JSRuntime.InvokeVoidAsync("btcUtility.initializeTooltips");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("btcUtility.stopPriceWebSocket");
+        _dotNetHelper?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+    // #endregion
+
+    // #region Main Logic
     private async Task GenerateAddresses()
     {
         _errorMessage = "";
@@ -652,7 +675,9 @@
         _balanceResult = Money.Satoshis(totalBalanceSatoshis);
         IsBusy = false;
     }
+    // #endregion
 
+    // #region API & Data Fetching
     private async Task FetchHistoricalPrice(ScanResult scanResult, string address, string apiEndpoint, long fundedSatoshis)
     {
         try
@@ -666,7 +691,7 @@
                 var txDateTime = DateTimeOffset.FromUnixTimeSeconds(blockTime.GetInt64());
                 scanResult.FirstSeenDate = txDateTime.DateTime;
 
-                string dateForApi = txDateTime.ToString("yyyy-MM-dd");
+                string dateForApi = txDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
                 var priceResponse = await Http.GetStringAsync($"https://api.coinbase.com/v2/prices/BTC-USD/spot?date={dateForApi}");
                 using var priceDoc = JsonDocument.Parse(priceResponse);
@@ -691,7 +716,9 @@
             StateHasChanged();
         }
     }
+    // #endregion
 
+    // #region UI Event Handlers
     private void OnSavedXpubSelected(ChangeEventArgs e)
     {
         var alias = e.Value?.ToString();
@@ -705,8 +732,9 @@
     {
         _showAdvanced = !_showAdvanced;
     }
+    // #endregion
 
-    // --- Helper Methods ---
+    // #region Helper Methods
     private bool ValidateInputs(out Network network, out ScriptPubKeyType addressType, out BitcoinExtPubKey extPubKey)
     {
         network = GetNetworkFromString(_selectedNetworkString);
@@ -810,8 +838,9 @@
         }
         return Regex.Replace(input, "[^1-9A-HJ-NP-Za-km-z]", "");
     }
+    // #endregion
 
-    // --- Config and Modal Logic ---
+    // #region Config and Modal Logic
     private async Task LoadConfigAsync()
     {
         try
@@ -893,8 +922,9 @@
             await SaveConfigAsync();
         }
     }
+    // #endregion
 
-    // --- Dark Mode Logic ---
+    // #region Dark Mode Logic
     private async Task ToggleTheme()
     {
         _isDarkMode = !_isDarkMode;
@@ -929,8 +959,9 @@
             await JSRuntime.InvokeVoidAsync("localStorage.setItem", ThemeKey, theme);
         }
     }
+    // #endregion
 
-    // --- Pagination Logic ---
+    // #region Pagination & UI Interaction
     private void UpdateGenAddrPagination()
     {
         _genAddrTotalPages = (int)Math.Ceiling(_generatedAddresses.Count / (double)_pageSize);
@@ -959,16 +990,9 @@
             _errorMessage = $"Copy failed: {ex.Message}";
         }
     }
+    // #endregion
 
-    // --- IAsyncDisposable Implementation ---
-    public async ValueTask DisposeAsync()
-    {
-        await JSRuntime.InvokeVoidAsync("btcUtility.stopPriceWebSocket");
-        _dotNetHelper?.Dispose();
-    }
-
-
-    // --- Data Models ---
+    // #region Data Models
     public class AppConfig
     {
         public Dictionary<string, string> SavedXpubs { get; set; } = new();
@@ -989,4 +1013,6 @@
         public required string Address { get; set; }
         public bool? IsUsed { get; set; } // null = not checked, true = used, false = unused
     }
+    // #endregion
 }
+
