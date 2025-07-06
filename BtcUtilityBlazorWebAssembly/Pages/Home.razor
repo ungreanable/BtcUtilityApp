@@ -6,6 +6,8 @@
 @using Microsoft.JSInterop
 @using NBitcoin
 
+@implements IAsyncDisposable
+
 @inject HttpClient Http
 @inject IJSRuntime JSRuntime
 
@@ -21,13 +23,42 @@
     .status-warning {
         color: var(--bs-orange);
     }
+
+    .copy-btn {
+        cursor: pointer;
+    }
+
+    .address-copied {
+        background-color: var(--bs-info-bg-subtle) !important;
+    }
 </style>
 
 
 <PageTitle>BTC Utility Web App</PageTitle>
 
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="copyToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <i class="bi bi-clipboard-check-fill me-2"></i>
+            <strong class="me-auto">Success</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+            @_toastMessage
+        </div>
+    </div>
+</div>
+
+
 <div class="container my-4">
-    <div class="position-absolute top-0 end-0 p-3">
+    <div class="position-absolute top-0 end-0 p-3 d-flex align-items-center gap-2">
+        @if (_currentBtcPrice.HasValue)
+        {
+            <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis rounded-pill fs-6" title="Last updated: @_lastPriceUpdate?.ToString("HH:mm:ss")">
+                <img src="images/bitcoin.ico" style="width: 16px; height: 16px; margin-top: -2px;" />
+                $@_currentBtcPrice.Value.ToString("N2")
+            </span>
+        }
         <button class="btn btn-outline-secondary" @onclick="ToggleTheme">
             <i class="bi @(_isDarkMode ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
         </button>
@@ -61,7 +92,7 @@
                                     <option value="@alias">@alias</option>
                                 }
                             </select>
-                            <button class="btn btn-outline-secondary" type="button" @onclick="ShowConfigModal">Manage</button>
+                            <button class="btn btn-secondary" type="button" @onclick="ShowConfigModal">Manage</button>
                         </div>
                         <textarea class="form-control mt-2" rows="3" placeholder="Or paste your xpub/ypub/zpub here..." @bind="_currentXpub" @bind:event="oninput"></textarea>
                     </div>
@@ -93,7 +124,6 @@
                     </div>
 
                     <div class="collapse @(_showAdvanced ? "show" : "")">
-                        <!-- แก้ไข: เปลี่ยน bg-light เป็น bg-body-tertiary เพื่อให้ปรับตามธีม -->
                         <div class="card card-body bg-body-tertiary mb-4">
                             <div class="row g-3">
                                 <div class="col-md-6">
@@ -104,6 +134,10 @@
                                     <label for="gapLimit" class="form-label">Balance Scan Gap Limit</label>
                                     <input type="number" id="gapLimit" class="form-control" @bind="_gapLimit" min="1" max="100">
                                 </div>
+                            </div>
+                            <div class="form-check form-switch mt-3">
+                                <input class="form-check-input" type="checkbox" role="switch" id="checkUsedAddress" @bind="_checkIfAddressUsed">
+                                <label class="form-check-label" for="checkUsedAddress">Verify if address has been used (slower)</label>
                             </div>
                             <div class="alert alert-warning mt-3 mb-0">
                                 <strong>Warning:</strong>
@@ -116,12 +150,15 @@
                     </div>
                     <!-- End Advanced Settings Section -->
                     <!-- Action Buttons -->
-                    <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                    <div class="d-flex justify-content-center gap-2">
                         <button class="btn btn-primary btn-lg px-4" @onclick="GenerateAddresses" disabled="@IsBusy">
-                            <i class="bi bi-plus-circle"></i> Generate Addresses
+                            <i class="bi bi-plus-circle"></i> @(_generatedAddresses.Any() ? "Generate More" : "Generate Addresses")
                         </button>
                         <button class="btn btn-success btn-lg px-4" @onclick="CheckBalance" disabled="@IsBusy">
                             <i class="bi bi-search"></i> Check Balance
+                        </button>
+                        <button class="btn btn-danger btn-lg px-4" @onclick="ClearResults" disabled="@IsBusy">
+                            <i class="bi bi-x-circle"></i> Clear
                         </button>
                     </div>
 
@@ -148,12 +185,49 @@
             @if (_generatedAddresses.Any())
             {
                 <div class="card mt-4">
-                    <div class="card-header">Generated Addresses (@_generatedAddresses.Count)</div>
-                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                        <ul class="list-group list-group-flush">
-                            @foreach (var addr in _generatedAddresses)
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Generated Addresses (@_generatedAddresses.Count)</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="input-group input-group-sm" style="width: 150px;">
+                                <span class="input-group-text">Per Page</span>
+                                <input type="number" class="form-control" @bind="_pageSize" @bind:event="oninput" min="5" max="100" @onchange="UpdateGenAddrPagination">
+                            </div>
+                            @if (_genAddrTotalPages > 1)
                             {
-                                <li class="list-group-item font-monospace">@addr</li>
+                                <nav aria-label="Generated Addresses Pagination">
+                                    <ul class="pagination pagination-sm mb-0">
+                                        <li class="page-item @(_genAddrCurrentPage == 1 ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => _genAddrCurrentPage--">&laquo;</button>
+                                        </li>
+                                        <li class="page-item active">
+                                            <span class="page-link">@_genAddrCurrentPage / @_genAddrTotalPages</span>
+                                        </li>
+                                        <li class="page-item @(_genAddrCurrentPage == _genAddrTotalPages ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => _genAddrCurrentPage++">&raquo;</button>
+                                        </li>
+                                    </ul>
+                                </nav>
+                            }
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var addrInfo in _generatedAddresses.Skip((_genAddrCurrentPage - 1) * _pageSize).Take(_pageSize))
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center font-monospace @(_copiedAddresses.Contains(addrInfo.Address) ? "address-copied" : "")">
+                                    <span>
+                                        @addrInfo.Address
+                                        @if (addrInfo.IsUsed == true)
+                                        {
+                                            <span class="badge bg-danger ms-2">Used</span>
+                                        }
+                                        else if (addrInfo.IsUsed == false)
+                                        {
+                                            <span class="badge bg-success ms-2">Unused</span>
+                                        }
+                                    </span>
+                                    <i class="bi bi-clipboard-check-fill text-success copy-btn" title="Copy to clipboard" @onclick="() => CopyToClipboard(addrInfo.Address)"></i>
+                                </li>
                             }
                         </ul>
                     </div>
@@ -163,21 +237,59 @@
             @if (_scanResults.Any())
             {
                 <div class="card mt-4">
-                    <div class="card-header">Balance Scan Details (Found: @_foundBalanceCount)</div>
-                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                        <ul class="list-group list-group-flush">
-                            @foreach (var result in _scanResults)
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Balance Scan Details (Found: @_foundBalanceCount)</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="input-group input-group-sm" style="width: 150px;">
+                                <span class="input-group-text">Per Page</span>
+                                <input type="number" class="form-control" @bind="_pageSize" @bind:event="oninput" min="5" max="100" @onchange="UpdateScanPagination">
+                            </div>
+                            @if (_scanTotalPages > 1)
                             {
-                                <li class="list-group-item d-flex justify-content-between align-items-center font-monospace">
-                                    <span>@result.Index: @result.Address</span>
-                                    @if (result.Balance > 0)
-                                    {
-                                        <span class="badge bg-success rounded-pill">@Money.Satoshis(result.Balance).ToDecimal(MoneyUnit.BTC) BTC</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="badge bg-secondary rounded-pill">Empty</span>
-                                    }
+                                <nav aria-label="Scan Results Pagination">
+                                    <ul class="pagination pagination-sm mb-0">
+                                        <li class="page-item @(_scanCurrentPage == 1 ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => _scanCurrentPage--">&laquo;</button>
+                                        </li>
+                                        <li class="page-item active">
+                                            <span class="page-link">@_scanCurrentPage / @_scanTotalPages</span>
+                                        </li>
+                                        <li class="page-item @(_scanCurrentPage == _scanTotalPages ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => _scanCurrentPage++">&raquo;</button>
+                                        </li>
+                                    </ul>
+                                </nav>
+                            }
+                        </div>
+                    </div>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;" id="scan-results-container">
+                        <ul class="list-group list-group-flush">
+                            @foreach (var result in _scanResults.Skip((_scanCurrentPage - 1) * _pageSize).Take(_pageSize))
+                            {
+                                <li id="scan-result-@result.Index" class="list-group-item d-flex justify-content-between align-items-center font-monospace">
+                                    <div>
+                                        <span class="d-block">@result.Index: @result.Address</span>
+                                        @if (result.FirstSeenDate.HasValue)
+                                        {
+                                            <small class="text-muted">First seen: @result.FirstSeenDate.Value.ToString("yyyy-MM-dd")</small>
+                                        }
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        @if (result.TotalFundedValueAtHistoricalPrice.HasValue)
+                                        {
+                                            <span class="badge bg-info-subtle border border-info-subtle text-info-emphasis rounded-pill">
+                                                Total In: $@result.TotalFundedValueAtHistoricalPrice.Value.ToString("N2")
+                                            </span>
+                                        }
+                                        @if (result.Balance > 0)
+                                        {
+                                            <span class="badge bg-success rounded-pill">@Money.Satoshis(result.Balance).ToDecimal(MoneyUnit.BTC) BTC</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary rounded-pill">Empty</span>
+                                        }
+                                    </div>
                                 </li>
                             }
                         </ul>
@@ -193,7 +305,10 @@
                     <div class="card-header">Total Balance Result</div>
                     <div class="card-body text-center">
                         <h3 class="display-6">@_balanceResult.ToDecimal(MoneyUnit.BTC) BTC</h3>
-                        <p class="text-muted">Total confirmed balance</p>
+                        @if (_currentBtcPrice.HasValue)
+                        {
+                            <p class="lead text-muted">≈ $@((_balanceResult.ToDecimal(MoneyUnit.BTC) * _currentBtcPrice.Value).ToString("N2")) USD</p>
+                        }
                     </div>
                 </div>
             }
@@ -313,6 +428,63 @@
 
 <!-- Script สำหรับ Bootstrap JS Bundle -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+<script>
+    window.btcUtility = {
+        copyToClipboard: function (text) {
+            navigator.clipboard.writeText(text).then(function () {
+                // Optional: show a toast or notification
+            }).catch(function (error) {
+                console.error('Error copying text: ', error);
+            });
+        },
+        scrollToElement: function (elementId) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        },
+        showToast: function (toastId) {
+            const toastEl = document.getElementById(toastId);
+            if (toastEl) {
+                const toast = new bootstrap.Toast(toastEl);
+                toast.show();
+            }
+        },
+        priceSocket: null,
+        startPriceWebSocket: function (dotnetHelper) {
+            this.priceSocket = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+
+            this.priceSocket.onopen = function (event) {
+                const subscribeMessage = {
+                    type: 'subscribe',
+                    product_ids: ['BTC-USD'],
+                    channels: ['ticker']
+                };
+                this.send(JSON.stringify(subscribeMessage));
+            };
+
+            this.priceSocket.onmessage = function (event) {
+                try {
+                    const priceData = JSON.parse(event.data);
+                    if (priceData.type === 'ticker' && priceData.price) {
+                        dotnetHelper.invokeMethodAsync('UpdatePriceFromSocket', priceData.price);
+                    }
+                } catch (e) {
+                    // console.error("Failed to parse price data", e);
+                }
+            };
+
+            this.priceSocket.onerror = function (error) {
+                console.error('WebSocket Error: ', error);
+            };
+        },
+        stopPriceWebSocket: function () {
+            if (this.priceSocket) {
+                this.priceSocket.close();
+            }
+        }
+    };
+</script>
 
 
 @code {
@@ -322,17 +494,27 @@
     private string _selectedNetworkString = "Main";
     private string _selectedAddressTypeString = "Segwit";
 
-    private List<string> _generatedAddresses = new();
+    private List<GeneratedAddressInfo> _generatedAddresses = new();
     private Money? _balanceResult = null;
     private string _statusMessage = "";
     private string _errorMessage = "";
     private bool IsBusy = false;
+    private decimal? _currentBtcPrice = null;
 
     // --- Advanced Settings State ---
     private bool _showAdvanced = false;
     private int _gapLimit = 20;
     private int _generateCount = 20;
+    private int _pageSize = 20;
+    private bool _checkIfAddressUsed = false;
 
+    // --- Pagination State ---
+    private int _genAddrCurrentPage = 1;
+    private int _genAddrTotalPages = 1;
+    private int _scanCurrentPage = 1;
+    private int _scanTotalPages = 1;
+
+    // --- Scan State ---
     private List<ScanResult> _scanResults = new();
     private int _foundBalanceCount = 0;
     private bool _isApproachingGapLimit = false;
@@ -345,6 +527,14 @@
     // --- Dark Mode State ---
     private bool _isDarkMode = false;
 
+    // --- Toast & Highlight State ---
+    private string _toastMessage = "";
+    private HashSet<string> _copiedAddresses = new();
+
+    // --- WebSocket State ---
+    private DotNetObjectReference<Home>? _dotNetHelper;
+    private DateTime? _lastPriceUpdate;
+
     // --- Constants ---
     private const string ConfigKey = "BtcUtilityConfig";
     private const string ThemeKey = "BtcUtilityTheme";
@@ -353,23 +543,38 @@
     // --- Lifecycle Methods ---
     protected override async Task OnInitializedAsync()
     {
+        _dotNetHelper = DotNetObjectReference.Create(this);
         await LoadConfigAsync();
         await LoadThemeAsync();
+        await JSRuntime.InvokeVoidAsync("btcUtility.startPriceWebSocket", _dotNetHelper);
     }
 
     // --- UI Event Handlers ---
-    private void GenerateAddresses()
+    private async Task GenerateAddresses()
     {
-        ClearResults();
+        _errorMessage = "";
         if (!ValidateInputs(out var network, out var addressType, out var extPubKey)) return;
 
-        var addresses = new List<string>();
+        IsBusy = true;
+
+        int startIndex = _generatedAddresses.Count;
         for (int i = 0; i < _generateCount; i++)
         {
-            var address = GenerateAddressByIndex(extPubKey, (uint)i, network, addressType);
-            addresses.Add(address.ToString());
+            var currentIndex = (uint)(startIndex + i);
+            _statusMessage = $"Generating & Verifying Index {currentIndex}...";
+            StateHasChanged();
+
+            var address = GenerateAddressByIndex(extPubKey, currentIndex, network, addressType);
+            bool? isUsed = null;
+            if (_checkIfAddressUsed)
+            {
+                isUsed = await CheckAddressUsage(address.ToString(), network);
+            }
+            _generatedAddresses.Add(new GeneratedAddressInfo { Address = address.ToString(), IsUsed = isUsed });
         }
-        _generatedAddresses = addresses;
+
+        UpdateGenAddrPagination();
+        IsBusy = false;
     }
 
     private async Task CheckBalance()
@@ -400,6 +605,8 @@
                 var chainStats = doc.RootElement.GetProperty("chain_stats");
                 int txCount = chainStats.GetProperty("tx_count").GetInt32();
 
+                var scanResult = new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = 0 };
+
                 if (txCount > 0)
                 {
                     long fundedSum = chainStats.GetProperty("funded_txo_sum").GetInt64();
@@ -411,15 +618,22 @@
                         totalBalanceSatoshis += balance;
                         _foundBalanceCount++;
                     }
+                    scanResult.Balance = balance;
+
+                    await Task.Delay(250);
+                    await FetchHistoricalPrice(scanResult, address.ToString(), apiEndpoint, fundedSum);
 
                     consecutiveUnused = 0;
-                    _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = balance });
                 }
                 else
                 {
                     consecutiveUnused++;
-                    _scanResults.Add(new ScanResult { Index = $"#{index}", Address = address.ToString(), Balance = 0 });
                 }
+                _scanResults.Add(scanResult);
+                UpdateScanPagination();
+                StateHasChanged();
+                await JSRuntime.InvokeVoidAsync("btcUtility.scrollToElement", $"scan-result-#{index}");
+
             }
             catch (HttpRequestException)
             {
@@ -437,6 +651,45 @@
 
         _balanceResult = Money.Satoshis(totalBalanceSatoshis);
         IsBusy = false;
+    }
+
+    private async Task FetchHistoricalPrice(ScanResult scanResult, string address, string apiEndpoint, long fundedSatoshis)
+    {
+        try
+        {
+            var txsResponse = await Http.GetStringAsync($"https://blockstream.info/{apiEndpoint}/address/{address}/txs");
+            using var txsDoc = JsonDocument.Parse(txsResponse);
+            var firstTx = txsDoc.RootElement.EnumerateArray().LastOrDefault();
+
+            if (firstTx.TryGetProperty("status", out var status) && status.TryGetProperty("block_time", out var blockTime))
+            {
+                var txDateTime = DateTimeOffset.FromUnixTimeSeconds(blockTime.GetInt64());
+                scanResult.FirstSeenDate = txDateTime.DateTime;
+
+                string dateForApi = txDateTime.ToString("yyyy-MM-dd");
+
+                var priceResponse = await Http.GetStringAsync($"https://api.coinbase.com/v2/prices/BTC-USD/spot?date={dateForApi}");
+                using var priceDoc = JsonDocument.Parse(priceResponse);
+                if (priceDoc.RootElement.TryGetProperty("data", out var data) && data.TryGetProperty("amount", out var amount))
+                {
+                    var historicalPrice = decimal.Parse(amount.GetString()!);
+                    scanResult.HistoricalPrice = historicalPrice;
+                    scanResult.TotalFundedValueAtHistoricalPrice = Money.Satoshis(fundedSatoshis).ToDecimal(MoneyUnit.BTC) * historicalPrice;
+                }
+            }
+        }
+        catch { /* Ignore errors, price is optional */ }
+    }
+
+    [JSInvokable]
+    public void UpdatePriceFromSocket(string newPrice)
+    {
+        if (decimal.TryParse(newPrice, out var price))
+        {
+            _currentBtcPrice = price;
+            _lastPriceUpdate = DateTime.Now;
+            StateHasChanged();
+        }
     }
 
     private void OnSavedXpubSelected(ChangeEventArgs e)
@@ -485,6 +738,25 @@
         }
     }
 
+    private async Task<bool> CheckAddressUsage(string address, Network network)
+    {
+        string apiEndpoint = network == Network.Main ? "api" : "api/testnet";
+        try
+        {
+            var response = await Http.GetStringAsync($"https://blockstream.info/{apiEndpoint}/address/{address}");
+            using var doc = JsonDocument.Parse(response);
+            return doc.RootElement.GetProperty("chain_stats").GetProperty("tx_count").GetInt32() > 0;
+        }
+        catch (HttpRequestException)
+        {
+            return false; // 404 means not used
+        }
+        catch
+        {
+            return false; // Other errors, assume not used
+        }
+    }
+
     private void ClearResults()
     {
         _errorMessage = "";
@@ -493,6 +765,9 @@
         _scanResults.Clear();
         _foundBalanceCount = 0;
         _isApproachingGapLimit = false;
+        _genAddrCurrentPage = 1;
+        _scanCurrentPage = 1;
+        _copiedAddresses.Clear();
     }
 
     private Network GetNetworkFromString(string networkString)
@@ -637,7 +912,6 @@
             }
             else
             {
-                // Auto-detect theme based on time if no preference is saved
                 var hour = DateTime.Now.Hour;
                 _isDarkMode = hour < 6 || hour >= 18;
             }
@@ -656,6 +930,44 @@
         }
     }
 
+    // --- Pagination Logic ---
+    private void UpdateGenAddrPagination()
+    {
+        _genAddrTotalPages = (int)Math.Ceiling(_generatedAddresses.Count / (double)_pageSize);
+        if (_genAddrCurrentPage > _genAddrTotalPages) _genAddrCurrentPage = _genAddrTotalPages;
+        if (_genAddrCurrentPage < 1) _genAddrCurrentPage = 1;
+    }
+
+    private void UpdateScanPagination()
+    {
+        _scanTotalPages = (int)Math.Ceiling(_scanResults.Count / (double)_pageSize);
+        if (_scanCurrentPage > _scanTotalPages) _scanCurrentPage = _scanTotalPages;
+        if (_scanCurrentPage < 1) _scanCurrentPage = 1;
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("btcUtility.copyToClipboard", text);
+            _toastMessage = $"Copied: {Truncate(text, 20)}";
+            _copiedAddresses.Add(text);
+            await JSRuntime.InvokeVoidAsync("btcUtility.showToast", "copyToast");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Copy failed: {ex.Message}";
+        }
+    }
+
+    // --- IAsyncDisposable Implementation ---
+    public async ValueTask DisposeAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("btcUtility.stopPriceWebSocket");
+        _dotNetHelper?.Dispose();
+    }
+
+
     // --- Data Models ---
     public class AppConfig
     {
@@ -667,5 +979,14 @@
         public required string Index { get; set; }
         public required string Address { get; set; }
         public long Balance { get; set; }
+        public decimal? HistoricalPrice { get; set; }
+        public DateTime? FirstSeenDate { get; set; }
+        public decimal? TotalFundedValueAtHistoricalPrice { get; set; }
+    }
+
+    public class GeneratedAddressInfo
+    {
+        public required string Address { get; set; }
+        public bool? IsUsed { get; set; } // null = not checked, true = used, false = unused
     }
 }
