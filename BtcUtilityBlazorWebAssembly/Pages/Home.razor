@@ -62,7 +62,8 @@
                 @if (_currentBtcPrice.HasValue)
                 {
                     <div class="d-flex align-items-center gap-2 p-1 rounded" style="background-color: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
-                        <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis rounded-pill fs-6">
+                        <span class="badge bg-success-subtle border border-success-subtle text-success-emphasis rounded-pill fs-6"
+                              data-bs-toggle="tooltip" data-bs-placement="bottom" title="Last updated: @_lastPriceUpdate?.ToString("HH:mm:ss")">
                             <img src="images/bitcoin.ico" style="width: 16px; height: 16px; margin-top: -2px;" />
                             $@_currentBtcPrice.Value.ToString("N2")
                         </span>
@@ -78,13 +79,11 @@
         <p class="lead text-muted">A web-based tool for generating BTC addresses and checking balances from an xpub.</p>
     </header>
 
-    <!-- Main Content Area -->
     <div class="row justify-content-center">
         <div class="col-lg-8">
             <div class="card shadow-sm">
                 <div class="card-body p-4">
 
-                    <!-- xpub Input Section -->
                     <div class="mb-3">
                         <label class="form-label fw-bold">1. Select or Enter your xpub</label>
                         <div class="input-group">
@@ -100,7 +99,6 @@
                         <textarea class="form-control mt-2" rows="3" placeholder="Or paste your xpub/ypub/zpub here..." @bind="_currentXpub" @bind:event="oninput"></textarea>
                     </div>
 
-                    <!-- Settings Section -->
                     <div class="row g-3 mb-3">
                         <div class="col-md-6">
                             <label for="networkSelect" class="form-label fw-bold">2. Network</label>
@@ -119,7 +117,6 @@
                         </div>
                     </div>
 
-                    <!-- Advanced Settings Section -->
                     <div class="d-flex justify-content-end mb-2">
                         <button class="btn btn-link btn-sm" type="button" @onclick="ToggleAdvancedSettings">
                             Advanced Settings <i class="bi @(_showAdvanced ? "bi-chevron-up" : "bi-chevron-down")"></i>
@@ -151,8 +148,6 @@
                             </div>
                         </div>
                     </div>
-                    <!-- End Advanced Settings Section -->
-                    <!-- Action Buttons -->
                     <div class="d-flex justify-content-center gap-2">
                         <button class="btn btn-primary btn-lg px-4" @onclick="GenerateAddresses" disabled="@IsBusy">
                             <i class="bi bi-plus-circle"></i> @(_generatedAddresses.Any() ? "Generate More" : "Generate Addresses")
@@ -168,7 +163,6 @@
                 </div>
             </div>
 
-            <!-- Results Area -->
             @if (IsBusy)
             {
                 <div class="text-center mt-4">
@@ -184,7 +178,6 @@
                 <div class="alert alert-danger mt-4">@_errorMessage</div>
             }
 
-            <!-- Address Generation Result -->
             @if (_generatedAddresses.Any())
             {
                 <div class="card mt-4">
@@ -269,7 +262,7 @@
                         <ul class="list-group list-group-flush">
                             @foreach (var result in _scanResults.Skip((_scanCurrentPage - 1) * _pageSize).Take(_pageSize))
                             {
-                                <li id="scan-result-@result.Index" class="list-group-item d-flex justify-content-between align-items-center font-monospace">
+                                <li id="scan-result-@result.Index" class="list-group-item d-flex justify-content-between align-items-center font-monospace flex-wrap">
                                     <div>
                                         <span class="d-block">@result.Index: @result.Address</span>
                                         @if (result.FirstSeenDate.HasValue)
@@ -277,18 +270,30 @@
                                             <small class="text-muted">First seen: @result.FirstSeenDate.Value.ToString("yyyy-MM-dd")</small>
                                         }
                                     </div>
-                                    <div class="d-flex gap-2">
-                                        @if (result.TotalFundedValueAtHistoricalPrice.HasValue)
+                                    <div class="d-flex gap-2 flex-wrap justify-content-end mt-1 mt-md-0">
+                                        @if (result.TotalFundedSatoshis > 0)
                                         {
-                                            <span class="badge bg-info-subtle border border-info-subtle text-info-emphasis rounded-pill">
-                                                Total In: $@result.TotalFundedValueAtHistoricalPrice.Value.ToString("N2")
+                                            <span class="badge bg-info-subtle border border-info-subtle text-info-emphasis rounded-pill" title="Value at time of first transaction">
+                                                In: $@(result.TotalFundedValueAtHistoricalPrice?.ToString("N2") ?? "N/A")
+                                            </span>
+                                        }
+                                        @if (result.TotalSpentSatoshis > 0)
+                                        {
+                                            <span class="badge bg-warning-subtle border border-warning-subtle text-warning-emphasis rounded-pill" title="Value at time of first transaction">
+                                                Out: $@(result.TotalSpentValueAtHistoricalPrice?.ToString("N2") ?? "N/A")
+                                            </span>
+                                        }
+                                        @if (result.Balance > 0 && _currentBtcPrice.HasValue)
+                                        {
+                                            <span class="badge bg-primary-subtle border border-primary-subtle text-primary-emphasis rounded-pill" title="Current value of this address's balance">
+                                                Now: $@((Money.Satoshis(result.Balance).ToDecimal(MoneyUnit.BTC) * _currentBtcPrice.Value).ToString("N2"))
                                             </span>
                                         }
                                         @if (result.Balance > 0)
                                         {
                                             <span class="badge bg-success rounded-pill">@Money.Satoshis(result.Balance).ToDecimal(MoneyUnit.BTC) BTC</span>
                                         }
-                                        else
+                                        else if (result.TotalFundedSatoshis > 0)
                                         {
                                             <span class="badge bg-secondary rounded-pill">Empty</span>
                                         }
@@ -301,7 +306,6 @@
             }
 
 
-            <!-- Balance Check Result -->
             @if (_balanceResult != null)
             {
                 <div class="card mt-4">
@@ -310,7 +314,11 @@
                         <h3 class="display-6">@_balanceResult.ToDecimal(MoneyUnit.BTC) BTC</h3>
                         @if (_currentBtcPrice.HasValue)
                         {
-                            <p class="lead text-muted">≈ $@((_balanceResult.ToDecimal(MoneyUnit.BTC) * _currentBtcPrice.Value).ToString("N2")) USD</p>
+                            <p class="lead text-muted mb-1">≈ $@((_balanceResult.ToDecimal(MoneyUnit.BTC) * _currentBtcPrice.Value).ToString("N2")) USD</p>
+                        }
+                        @if (_averageCostBasis.HasValue)
+                        {
+                            <p class="text-muted">Average Cost Basis: <strong>$@_averageCostBasis.Value.ToString("N2")</strong></p>
                         }
                     </div>
                 </div>
@@ -321,7 +329,6 @@
 </div>
 
 
-<!-- Config Management Modal -->
 <div class="modal fade" id="configModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -371,7 +378,6 @@
     </div>
 </div>
 
-<!-- Help / FAQ Modal -->
 <div class="modal fade" id="helpModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -429,7 +435,6 @@
 </div>
 
 
-<!-- Script สำหรับ Bootstrap JS Bundle -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
     window.btcUtility = {
@@ -507,6 +512,7 @@
     private string _errorMessage = "";
     private bool IsBusy = false;
     private decimal? _currentBtcPrice = null;
+    private decimal? _averageCostBasis = null;
     // #endregion
 
     // #region Advanced Settings State
@@ -609,6 +615,7 @@
         StateHasChanged();
 
         long totalBalanceSatoshis = 0;
+        decimal totalWeightedCostOfBalance = 0;
         int consecutiveUnused = 0;
         uint index = 0;
         string apiEndpoint = network == Network.Main ? "api" : "api/testnet";
@@ -636,15 +643,24 @@
                     long spentSum = chainStats.GetProperty("spent_txo_sum").GetInt64();
                     long balance = fundedSum - spentSum;
 
+                    scanResult.Balance = balance;
+                    scanResult.TotalFundedSatoshis = fundedSum;
+                    scanResult.TotalSpentSatoshis = spentSum;
+
                     if (balance > 0)
                     {
                         totalBalanceSatoshis += balance;
                         _foundBalanceCount++;
                     }
-                    scanResult.Balance = balance;
 
                     await Task.Delay(250);
-                    await FetchHistoricalPrice(scanResult, address.ToString(), apiEndpoint, fundedSum);
+                    await FetchHistoricalPrice(scanResult);
+
+                    if (balance > 0 && scanResult.HistoricalPrice.HasValue)
+                    {
+                        decimal btcBalanceForAddress = Money.Satoshis(balance).ToDecimal(MoneyUnit.BTC);
+                        totalWeightedCostOfBalance += btcBalanceForAddress * scanResult.HistoricalPrice.Value;
+                    }
 
                     consecutiveUnused = 0;
                 }
@@ -673,16 +689,23 @@
         }
 
         _balanceResult = Money.Satoshis(totalBalanceSatoshis);
+        var totalBtcInWallet = _balanceResult.ToDecimal(MoneyUnit.BTC);
+        if (totalBtcInWallet > 0)
+        {
+            _averageCostBasis = totalWeightedCostOfBalance / totalBtcInWallet;
+        }
+
         IsBusy = false;
     }
     // #endregion
 
     // #region API & Data Fetching
-    private async Task FetchHistoricalPrice(ScanResult scanResult, string address, string apiEndpoint, long fundedSatoshis)
+    private async Task FetchHistoricalPrice(ScanResult scanResult)
     {
         try
         {
-            var txsResponse = await Http.GetStringAsync($"https://blockstream.info/{apiEndpoint}/address/{address}/txs");
+            string apiEndpoint = GetNetworkFromString(_selectedNetworkString) == Network.Main ? "api" : "api/testnet";
+            var txsResponse = await Http.GetStringAsync($"https://blockstream.info/{apiEndpoint}/address/{scanResult.Address}/txs");
             using var txsDoc = JsonDocument.Parse(txsResponse);
             var firstTx = txsDoc.RootElement.EnumerateArray().LastOrDefault();
 
@@ -699,7 +722,8 @@
                 {
                     var historicalPrice = decimal.Parse(amount.GetString()!);
                     scanResult.HistoricalPrice = historicalPrice;
-                    scanResult.TotalFundedValueAtHistoricalPrice = Money.Satoshis(fundedSatoshis).ToDecimal(MoneyUnit.BTC) * historicalPrice;
+                    scanResult.TotalFundedValueAtHistoricalPrice = Money.Satoshis(scanResult.TotalFundedSatoshis).ToDecimal(MoneyUnit.BTC) * historicalPrice;
+                    scanResult.TotalSpentValueAtHistoricalPrice = Money.Satoshis(scanResult.TotalSpentSatoshis).ToDecimal(MoneyUnit.BTC) * historicalPrice;
                 }
             }
         }
@@ -796,6 +820,7 @@
         _genAddrCurrentPage = 1;
         _scanCurrentPage = 1;
         _copiedAddresses.Clear();
+        _averageCostBasis = null;
     }
 
     private Network GetNetworkFromString(string networkString)
@@ -1003,9 +1028,12 @@
         public required string Index { get; set; }
         public required string Address { get; set; }
         public long Balance { get; set; }
+        public long TotalFundedSatoshis { get; set; }
+        public long TotalSpentSatoshis { get; set; }
         public decimal? HistoricalPrice { get; set; }
         public DateTime? FirstSeenDate { get; set; }
         public decimal? TotalFundedValueAtHistoricalPrice { get; set; }
+        public decimal? TotalSpentValueAtHistoricalPrice { get; set; }
     }
 
     public class GeneratedAddressInfo
@@ -1015,4 +1043,3 @@
     }
     // #endregion
 }
-
